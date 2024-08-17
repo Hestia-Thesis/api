@@ -17,3 +17,16 @@ class Energy(Base):
     year = Column(Integer, primary_key=True)
     consumed = Column(Integer)
     predicted = Column(Integer, nullable=True)
+
+### FOR POSSIBLE TYPES TO USE UNDER THIS COMMENT CHECK IMPORTS FROM 'sqlalchemy'
+### EVERYTHING INSIDE [] U NEED TO CHANGE TO UR NEEDS
+'''
+class Energy(Base):
+    __tablename__ = '[exact db tablename]'
+
+    [DB column1] = Column([change to your type], [ForeignKey(User.user_id)] , [primary_key=True])
+    [DB column2] = Column([change to your type], [primary_key=True])
+    [DB column3] = Column([change to your type], [primary_key=True])
+    [DB column4] = Column([change to your type])
+    [DB column5] = Column([change to your type], [nullable=True])
+'''
