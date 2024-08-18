@@ -6,7 +6,7 @@ from typing_extensions import Self
 from database import engine, SessionLocal
 from sqlalchemy.orm import Session
 import models
-from datetime import date
+from datetime import date, datetime
 from hashlib import sha3_512
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -75,6 +75,61 @@ class EnergyUpdate(BaseModel):
             raise ValueError(f'The given date cannot be longer than 4 years ago: minimum month is {minimum_date.month}/{minimum_date.year}')
         return self
         
+class UserDetailsBase(BaseModel):
+    user_id : int
+    bedrooms: float | None = None
+    house_value: float | None = None
+    no_of_children: float | None = None
+    tot_ppl: float | None = None
+    employment_full_time_employee: float | None = None
+    employment_part_time_employee: float | None = None
+    employment_retired: float | None = None
+    employment_self_employed: float | None = None
+    employment_student: float | None = None
+    employment_unemployeed_seeking_work: float | None = None
+    family_structure_1_non_pensioner: float | None = None
+    family_structure_all_pensioners: float | None = None
+    family_structure_all_students: float | None = None
+    family_structure_couple_with_dependent_children: float | None = None
+    family_structure_other: float | None = None
+    family_structure_single_parent_dependent_children: float | None = None
+    savings_just_managing: float | None = None
+    savings_saving_a_lot: float | None = None
+    savings_saving_little: float | None = None
+    savings_using_savings_in_debt: float | None = None
+    house_type_bungalow: float | None = None
+    house_type_detached_house: float | None = None
+    house_type_flat_maisonette: float | None = None
+    house_type_semi_detached: float | None = None
+    house_type_terraced: float | None = None
+
+class WeatherInfoBase(BaseModel):
+    date: date    
+    temperatureMax: float
+    windBearing: int
+    cloudCover: float
+    windSpeed: float
+    humidity: float
+    day_time_minutes: int | None = None
+    is_holiday: int | None = None
+    season_Fall: float | None = None
+    season_Spring: float | None = None
+    season_Summer: float | None = None
+    season_Winter: float | None = None
+
+class WeatherInfoUpBase(BaseModel):
+    date: None = None | date
+    temperatureMax: float
+    windBearing: int
+    cloudCover: float
+    windSpeed: float
+    humidity: float
+    day_time_minutes: int | None = None
+    is_holiday: int | None = None
+    season_Fall: float | None = None
+    season_Spring: float | None = None
+    season_Summer: float | None = None
+    season_Winter: float | None = None
 
 def get_db():
     db = SessionLocal()
@@ -188,62 +243,128 @@ async def delete_energy_record(user_id : int, year: int, month: int, db: db_depe
     db.commit()
 
 
-### ML ANANYA ENDPOINTS ###
 
-#### 
-#### REMOVE ''' FROM THE CODE AT THE BEGINNING AND THE END
-#### VALUES THAT NEEDS CHANGING ARE INSIDE []
-#### REPLACE "energy" with a name of ur choosing that u keep using
-#### TO MAKE UR OWN PYDANTIC MODEL GO UP IN THE CODE AND LOOK UNDER THE COMMENT "PYDANTIC MODELS" JUST DO THE SAME AS WHAT I DID BUT FOR UR OWN VALUES
-#### TO MAKE UR OWN DB MODEL GO TO THE "models.py" FILE AND FOLLOW INSTRUCTIONS THERE
-####
+
+
+### USER DETAILS ENDPOINTS ###
 
 ## POST ##
-'''
-@app.post("/[endpointname]", status_code=status.HTTP_201_CREATED)
-async def create_[energy]]([energy] : [ur own pydantic model], db: db_dependency):
-    db_[energy] = models.[ur own db model](**[energy].model_dump())
-    db.add(db_[energy])
-    db.commit()
-    
-## GET ##
-@app.get("/[energy]", status_code=status.HTTP_200_OK)
-async def get_all_[energy]_records(db: db_dependency):
-    [energy] = db.query(models.[ur own db model]).all()
-    if len([energy]) == 0:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='No [energy] records found')
-    return [energy]
 
-@app.get("/[energy]{[user_id]}", status_code=status.HTTP_200_OK)
-async def get_[energy]_by_[user]_id([user_id] : int, db:db_dependency):
-    [energy] = db.query(models.[ur own db model]).filter(models.[ur own db model].[user_id] == [user_id]).all()
-    if len([energy]) == 0:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='No [energy] records matching this ID found')
-    return [energy]
+@app.post("/user_details", status_code=status.HTTP_201_CREATED)
+async def create_user_details(user_details : UserDetailsBase, db: db_dependency):
+    db_ud = models.UserDetail(**user_details.model_dump())
+    db.add(db_ud)
+    db.commit()
+    return db_ud
+
+## GET ##
+
+@app.get("/user_details", status_code=status.HTTP_200_OK)
+async def get_all_user_details_records(db: db_dependency):
+    user_details = db.query(models.UserDetail).all()
+    if len(user_details) == 0:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='No user_details records found')
+    return user_details
+
+@app.get("/user_details{user_id}", status_code=status.HTTP_200_OK)
+async def get_user_details_by_user_id(user_id : int, db:db_dependency):
+    user_details = db.query(models.UserDetail).filter(models.UserDetail.user_id == user_id).all()
+    if len(user_details) == 0:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='No user_details records matching this ID found')
+    return user_details
 
 ## PUT ##
-@app.put("/[energy]/{[user_id]}", status_code=status.HTTP_200_OK)
-async def update_[energy_record]([user_id] : int, [year]: [int], [month]: [int], [energy] : [ur own pydantic model], db: db_dependency):
-    db_[energy] = db.query(models.[ur own db model]).filter(models.[ur own db model].[user_id] == [user_id], models.[ur own db model].[year] == [year], models.[ur own db model].[month] == [month]).first()
-    if db_[energy] is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="The specified [energy record] is not found")
-    if [energy].[month] is not None:
-        db_[energy].month = [[energy]].[month]
-    if [energy].[year] is not None:
-        db_[energy].[year] = [energy].[year]
-    if energy.[consumed] is not None:
-        db_[energy].[consumed] = [energy].[consumed]
-    if energy.[predicted] is not None:
-        db_[energy].[predicted] = [energy].[predicted]  
-    db.commit()
-    return [energy]
 
-## DELETE
-@app.delete("/[energy]/{[user_id]}", status_code=status.HTTP_200_OK)
-async def delete_[energy_record]([user_id] : int, [year]: [int], [month]: [int], db: db_dependency):
-    [energy] = db.query(models.[ur own db model]).filter(models.[ur own db model].[user_id] == [user_id], models.[ur own db model].[year] == [year], models.[ur own db model].[month] == [month]).first()
-    if [energy] is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="The specified [energy record] is not found")
-    db.delete([energy])
+@app.put("/user_details/{user_id}", status_code=status.HTTP_200_OK)
+async def update_user(user_id : int, user_details : UserDetailsBase, db: db_dependency):
+    db_user_details = db.query(models.UserDetail).filter(models.UserDetail.user_id == [user_id]).first()
+    if db_user_details is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="The specified user_detail is not found")
+    update_data = user_details.model_dump()
+    for key, value in update_data.items():
+        if value == None:
+            setattr(db_user_details, key, 0)
+        else:
+            setattr(db_user_details, key, value)
+    db_user_details.user_id = user_id
     db.commit()
-'''
+    return db.query(models.UserDetail).filter(models.UserDetail.user_id == [user_id]).first()
+
+## DELETE ##
+
+@app.delete("/user_details/{user_id}", status_code=status.HTTP_200_OK)
+async def delete_user_details(user_id : int, db: db_dependency):
+    user_details = db.query(models.UserDetail).filter(models.UserDetail.user_id == user_id).first()
+    if user_details is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="The specified user is not found")
+    db.delete(user_details)
+    db.commit()
+
+## WEATHER ENDPOINTS ##
+
+## POST ##
+
+@app.post("/weather", status_code=status.HTTP_201_CREATED)
+async def create_weather(weather_details: WeatherInfoBase, db: db_dependency):
+    db_weather = models.Weather(**weather_details.model_dump())
+    db.add(db_weather)
+    db.commit()
+    return db_weather
+
+## GET ##
+
+@app.get("/weather", status_code=status.HTTP_200_OK)
+async def get_all_weather_records(db: db_dependency):
+    wd = db.query(models.Weather).all()
+    if len(wd) == 0:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='No weather records found')
+    return wd
+
+@app.get("/weather{date}", status_code=status.HTTP_200_OK)
+async def get_user_details_by_user_id(date_ : date, db:db_dependency):
+    wd = db.query(models.Weather).filter(models.Weather.date == date_).all()
+    if len(wd) == 0:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='No weather records matching this ID found')
+    return wd
+
+## PUT ##
+
+@app.put("/weather/{date}", status_code=status.HTTP_200_OK)
+async def update_user(date_ : date, weather_details : WeatherInfoUpBase, db: db_dependency):
+    season_dict = {1: 'Winter',
+               2: 'Winter',
+               3: 'Winter', 
+               4: 'Spring',
+               5: 'Spring',
+               6: 'Summer',
+               7: 'Summer',
+               8: 'Summer',
+               9: 'Summer',
+               10: 'Fall',
+               11: 'Fall',
+               12: 'Winter'}
+    weather_details.date = date_
+    db_wds = db.query(models.Weather).filter(models.Weather.date == date_).first()
+    season = list(season_dict.values())[db_wds.date.month - 1]
+    if db_wds is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="The specified weather data is not found")
+    update_data = weather_details.model_dump()
+    for key, value in update_data.items():
+        if season in key and 'season' in key:
+            setattr(db_wds, key, 1)
+        elif 'season' in key:
+            setattr(db_wds, key, 0)
+        else:
+            setattr(db_wds, key, value)
+    db.commit()
+    return db.query(models.Weather).filter(models.Weather.date == date_).first()
+
+### DELETE ###
+
+@app.delete("/weather/{date}", status_code=status.HTTP_200_OK)
+async def delete_user_details(date_ : date, db: db_dependency):
+    wd = db.query(models.Weather).filter(models.Weather.date == date_).first()
+    if wd is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="The specified weather record is not found")
+    db.delete(wd)
+    db.commit()
