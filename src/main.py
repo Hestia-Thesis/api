@@ -36,18 +36,21 @@ class UserUpdate(BaseModel):
 
 class EnergyBase(BaseModel):
     user_id : int
-    month : int
-    year : int
+    # month : int
+    # year : int
+    day: date
     consumed : int
     predicted : int
 
     @model_validator(mode='after')
     def check_date_range(self) -> Self:
         try:
-            given_date = date(year=self.year,month=self.month,day=1)
+            # given_date = date(year=self.year,month=self.month,day=1)
+            given_date = self.day
         except Exception as e:
             raise e
-        current_date = date(year = date.today().year, month = date.today().month, day = 1)
+        # current_date = date(year = date.today().year, month = date.today().month, day = 1)
+        current_date = date.today()
         if given_date >= current_date:
             raise ValueError('The given date must in the past')
         minimum_date = date(year= current_date.year-4, month= current_date.month, day=current_date.day)
@@ -56,23 +59,27 @@ class EnergyBase(BaseModel):
         return self
 
 class EnergyUpdate(BaseModel):
-    month : int | None = None
-    year : int | None = None
+    # month : int | None = None
+    # year : int | None = None
+    day: date | None = None
     consumed : int | None = None
     predicted : int | None = None
 
     @model_validator(mode='after')
     def check_date_range(self) -> Self:
         try:
-            given_date = date(year=self.year,month=self.month,day=1)
+            # given_date = date(year=self.year,month=self.month,day=1)
+            given_date = self.day
         except Exception as e:
             raise e
-        current_date = date(year = date.today().year, month = date.today().month, day = 1)
-        if given_date >= current_date:
-            raise ValueError('The given date must in the past')
-        minimum_date = date(year= current_date.year-4, month= current_date.month, day=current_date.day)
-        if given_date < minimum_date:
-            raise ValueError(f'The given date cannot be longer than 4 years ago: minimum month is {minimum_date.month}/{minimum_date.year}')
+        # current_date = date(year = date.today().year, month = date.today().month, day = 1)
+        current_date = date.today()
+        if given_date is not None:
+            if given_date >= current_date:
+                raise ValueError('The given date must in the past')
+            minimum_date = date(year= current_date.year-4, month= current_date.month, day=current_date.day)
+            if given_date < minimum_date:
+                raise ValueError(f'The given date cannot be longer than 4 years ago: minimum month is {minimum_date.month}/{minimum_date.year}')
         return self
         
 class UserDetailsBase(BaseModel):
@@ -217,15 +224,22 @@ async def get_energy_by_user_id(user_id : int, db:db_dependency):
     return energy
 
 ## PUT ##
-@app.put("/energy/{user_id}/{year}/{month}", status_code=status.HTTP_200_OK)
-async def update_energy_record(user_id : int, year: int, month: int, energy : EnergyUpdate, db: db_dependency):
-    db_energy = db.query(models.Energy).filter(models.Energy.user_id == user_id, models.Energy.year == year, models.Energy.month == month).first()
+
+@app.put("/energy/{user_id}/{day}", status_code=status.HTTP_200_OK)
+async def update_energy_record(user_id : int, day : date, energy : EnergyUpdate, db: db_dependency):
+    energy.day = day
+# @app.put("/energy/{user_id}/{year}/{month}", status_code=status.HTTP_200_OK)
+# async def update_energy_record(user_id : int, year: int, month: int, energy : EnergyUpdate, db: db_dependency):
+#     db_energy = db.query(models.Energy).filter(models.Energy.user_id == user_id, models.Energy.year == year, models.Energy.month == month).first()
+    db_energy = db.query(models.Energy).filter(models.Energy.user_id == user_id, models.Energy.day == day).first()
     if db_energy is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="The specified energy record is not found")
-    if energy.month is not None:
-        db_energy.month = energy.month
-    if energy.year is not None:
-        db_energy.year = energy.year
+    # if energy.month is not None:
+    #     db_energy.month = energy.month
+    # if energy.year is not None:
+    #     db_energy.year = energy.year
+    if energy.day is not None:
+        db_energy.day = energy.day
     if energy.consumed is not None:
         db_energy.consumed = energy.consumed
     if energy.predicted is not None:
@@ -234,16 +248,18 @@ async def update_energy_record(user_id : int, year: int, month: int, energy : En
     return energy
 
 ## DELETE
-@app.delete("/energy/{user_id}/{year}/{month}", status_code=status.HTTP_200_OK)
-async def delete_energy_record(user_id : int, year: int, month: int, db: db_dependency):
-    energy = db.query(models.Energy).filter(models.Energy.user_id == user_id, models.Energy.year == year, models.Energy.month == month).first()
+
+@app.delete("/energy/{user_id}/{day}", status_code=status.HTTP_200_OK)
+async def delete_energy_record(user_id : int, day: date, db: db_dependency):
+# @app.delete("/energy/{user_id}/{year}/{month}", status_code=status.HTTP_200_OK)
+# async def delete_energy_record(user_id : int, year: int, month: int, db: db_dependency):
+    # energy = db.query(models.Energy).filter(models.Energy.user_id == user_id, models.Energy.year == year, models.Energy.month == month).first()
+    energy = db.query(models.Energy).filter(models.Energy.user_id == user_id, models.Energy.day == day).first()
+
     if energy is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="The specified energy record is not found")
     db.delete(energy)
     db.commit()
-
-
-
 
 
 ### USER DETAILS ENDPOINTS ###
