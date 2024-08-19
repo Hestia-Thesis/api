@@ -53,8 +53,6 @@ class UserUpdate(BaseModel):
 
 class EnergyBase(BaseModel):
     user_id : int
-    # month : int
-    # year : int
     day: date
     consumed : int
     predicted : int
@@ -542,7 +540,7 @@ async def add_weather_from_api(info: WeatherAPIinfo, db: db_dependency):
             detail=f"Weather record for {info.day} already exists."
         )
     
-    response = requests.get(f'https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline/{info.city}/{info.day}?unitGroup={info.unit}&key={os.getenv('visualcrossing_api_key')}&include={info.type_data}&lang={info.lang}')
+    response = requests.get(f'https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline/{info.city}/{info.day}?unitGroup={info.unit}&key={os.getenv("visualcrossing_api_key")}&include={info.type_data}&lang={info.lang}')
     response_day_details = response.json()['days'][0]
     
     weather_info = WeatherInfoBase(
