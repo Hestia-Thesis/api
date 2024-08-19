@@ -19,6 +19,13 @@ import pickle
 from pathlib import Path
 import numpy as np
 
+## RECOMMENDATIONS FOR YARNI
+# 1. Always return something like the data/json obj or string
+# 2. make the error msgs better by adding smthg like:
+#   - f"Error: user_id {user_id} not found"
+#   add {} dynamic code to make msgs more reading
+# 3. when doing @post if the data already exists send a error msg
+
 load_dotenv(dotenv_path='../../.env', verbose=True)
 app = FastAPI()
 __ml_version__ = '0.1.1'
@@ -524,7 +531,7 @@ async def create_weather(weather_details: WeatherInfoBase, db: db_dependency):
         )
     db.add(db_weather)
     db.commit()
-    return 'weather record added'
+    return db_weather
 
 @app.post("/weather/api", status_code=status.HTTP_201_CREATED)
 async def add_weather_from_api(info: WeatherAPIinfo, db: db_dependency):
