@@ -5,12 +5,23 @@ from typing import Annotated
 from typing_extensions import Self
 from database import engine, SessionLocal
 from sqlalchemy.orm import Session
+from sqlalchemy import and_
 import models
 from datetime import date, datetime
 from hashlib import sha3_512
 from fastapi.middleware.cors import CORSMiddleware
+import requests
+import pandas as pd
+from dataclasses import dataclass
+from dotenv import load_dotenv
+import os
+import pickle
+from pathlib import Path
+import numpy as np
 
+load_dotenv(dotenv_path='../../.env', verbose=True)
 app = FastAPI()
+__ml_version__ = '0.1.1'
 
 app.add_middleware(
     CORSMiddleware,
@@ -32,7 +43,6 @@ class UserBase(BaseModel):
 class UserUpdate(BaseModel):
     email : str | None = None
     password: str | None = None
-
 
 class EnergyBase(BaseModel):
     user_id : int
@@ -110,6 +120,9 @@ class UserDetailsBase(BaseModel):
     house_type_semi_detached: float | None = None
     house_type_terraced: float | None = None
 
+    class Config:
+        from_attributes = True
+
 class WeatherInfoBase(BaseModel):
     date: date    
     temperatureMax: float
@@ -124,6 +137,55 @@ class WeatherInfoBase(BaseModel):
     season_Summer: float | None = None
     season_Winter: float | None = None
 
+
+    @classmethod
+    def get_holidays_list(self):
+        # Fetch and process holidays only once
+        holidays_response = requests.get('https://www.gov.uk/bank-holidays.json').json()
+        holidays_list = []
+        for place in holidays_response.keys():
+            events = holidays_response[place]["events"]
+            holidays_list.extend([event['date'] for event in events if event['date'] not in holidays_list])
+        return holidays_list
+    
+    def get_season(self, month: int):
+        # Define the season based on the month
+        season_dict = {
+            1: 'Winter', 2: 'Winter', 3: 'Winter', 
+            4: 'Spring', 5: 'Spring',
+            6: 'Summer', 7: 'Summer', 8: 'Summer', 9: 'Summer',
+            10: 'Fall', 11: 'Fall', 12: 'Winter'
+        }
+
+        season = season_dict[month]
+
+        # Reset all season fields to 0
+        for key in ['season_Fall', 'season_Spring', 'season_Summer', 'season_Winter']:
+            setattr(self, key, 0)
+
+        # Set the correct season field to 1
+        if season == 'Winter':
+            self.season_Winter = 1
+        elif season == 'Spring':
+            self.season_Spring = 1
+        elif season == 'Summer':
+            self.season_Summer = 1
+        elif season == 'Fall':
+            self.season_Fall = 1
+        
+    def __init__(self, **data):
+        super().__init__(**data)  # Initialize the Pydantic model first
+
+        # Ensure the holidays list is fetched
+        holidays_list = self.get_holidays_list()
+        self.is_holiday = 1 if (self.date.strftime("%Y-%m-%d") in holidays_list) or (self.date.weekday() >= 5) else 0
+
+        # Determine the season based on the month
+        self.get_season(month=self.date.month)
+
+    class Config:
+        from_attributes = True
+
 class WeatherInfoUpBase(BaseModel):
     date: None = None | date
     temperatureMax: float
@@ -137,6 +199,37 @@ class WeatherInfoUpBase(BaseModel):
     season_Spring: float | None = None
     season_Summer: float | None = None
     season_Winter: float | None = None
+
+    @model_validator(mode="before")
+    def fetch_missing_values(cls, values, **kwargs):
+        db: Session = kwargs.get('db')
+        date_value = values.get('date')
+
+        # If there is no database session or no date provided, return the values as is
+        if db is None or date_value is None:
+            return values
+
+        # Fetch the weather info record based on the date
+        db_wds = db.query(models.Weather).filter(models.Weather.date == date_value).first()
+        if not db_wds:
+            raise HTTPException(status_code=404, detail="Weather info not found for the provided date")
+
+        # Fill in missing fields with values from the database
+        for field in ['day_time_minutes', 'is_holiday', 'season_Fall', 'season_Spring', 'season_Summer', 'season_Winter']:
+            if values.get(field) is None:
+                values[field] = getattr(db_wds, field)
+
+        return values
+
+@dataclass
+class WeatherAPIinfo:
+    day: date
+    city: str = "Brussels,Belgium"
+    end_date: date | None = None
+    unit: str = "metric"
+    type_data: str = "days"
+    lang: str = 'en'
+    
 
 def get_db():
     db = SessionLocal()
@@ -207,7 +300,101 @@ async def add_energy_consumption(energy : EnergyBase, db: db_dependency):
     db_energy = models.Energy(**energy.model_dump())
     db.add(db_energy)
     db.commit()
+    
+@app.post("/energy/ml", status_code=status.HTTP_201_CREATED)
+async def add_predict_energy_consumption(energy : EnergyBase, db: db_dependency):
+    ## checking if a record already exists
+    existing = db.query(models.Energy).filter(and_(
+        models.Energy.day == energy.day,
+        models.Energy.user_id == energy.user_id
+        )).first()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Energy record for user_id {energy.user_id} on {energy.day} already exists."
+        )
 
+    ## creating input fields for the model
+    # taking inputs
+    weather = db.query(models.Weather).filter(models.Weather.date == energy.day).first()
+    user_detail = db.query(models.UserDetail).filter(models.UserDetail.user_id == energy.user_id).first()
+
+    # checking if the records exist
+    if weather is None:
+        add_weather_from_api(WeatherAPIinfo(day=energy.day))
+        weather = db.query(models.Weather).filter(models.Weather.date == energy.day).first()
+
+    if user_detail is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"User_detail record for user_id {energy.user_id} does not exist."
+        )
+    
+    # taking the input info as dict
+    w_dt = WeatherInfoBase.from_orm(weather).model_dump() if weather else {}
+    ud_dt = UserDetailsBase.from_orm(user_detail).model_dump() if user_detail else {}
+    # joining dicts
+    combined_data = {**w_dt, **ud_dt}
+
+    # turning the inputs usable
+    field_names = [
+  "temperatureMax",
+  "windBearing",
+  "cloudCover",
+  "windSpeed",
+  "humidity",
+  "day_time_minutes",
+  "is_holiday",
+  "season_Fall",
+  "season_Spring",
+  "season_Summer",
+  "season_Winter",
+  "bedrooms",
+  "house_value",
+  "no_of_children",
+  "tot_ppl",
+  "employment_full_time_employee",
+  "employment_part_time_employee",
+  "employment_retired",
+  "employment_self_employed",
+  "employment_student",
+  "employment_unemployeed_seeking_work",
+  "family_structure_1_non_pensioner",
+  "family_structure_all_pensioners",
+  "family_structure_all_students",
+  "family_structure_couple_with_dependent_children",
+  "family_structure_other",
+  "family_structure_single_parent_dependent_children",
+  "savings_just_managing",
+  "savings_saving_a_lot",
+  "savings_saving_little",
+  "savings_using_savings_in_debt",
+  "house_type_bungalow",
+  "house_type_detached_house",
+  "house_type_flat_maisonette",
+  "house_type_semi_detached",
+  "house_type_terraced"
+]
+    combined_data = {key: value for key, value in combined_data.items() if key in field_names}
+
+
+    # opening the model
+    BASE_DIR = Path(__file__).resolve(strict=True).parent
+
+    with open(f'{BASE_DIR}\\random_forest_regressor_{__ml_version__}.pkl', 'rb') as m:
+        ml_model = pickle.load(m)
+
+    # taking the prediction
+    prediction = ml_model.predict(np.array(list(combined_data.values())).reshape(1, -1))[0]
+
+    energy.predicted = prediction
+    db_energy = models.Energy(**energy.model_dump())
+    
+    # adding data to db
+    db.add(db_energy)
+    db.commit()
+    return energy
+    
 ## GET ##
 @app.get("/energy", status_code=status.HTTP_200_OK)
 async def get_all_energy_records(db: db_dependency):
@@ -216,7 +403,7 @@ async def get_all_energy_records(db: db_dependency):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='No energy records found')
     return energy
 
-@app.get("/energy{user_id}", status_code=status.HTTP_200_OK)
+@app.get("/energy/{user_id}", status_code=status.HTTP_200_OK)
 async def get_energy_by_user_id(user_id : int, db:db_dependency):
     energy = db.query(models.Energy).filter(models.Energy.user_id == user_id).all()
     if len(energy) == 0:
@@ -269,6 +456,12 @@ async def delete_energy_record(user_id : int, day: date, db: db_dependency):
 @app.post("/user_details", status_code=status.HTTP_201_CREATED)
 async def create_user_details(user_details : UserDetailsBase, db: db_dependency):
     db_ud = models.UserDetail(**user_details.model_dump())
+    existing = db.query(models.UserDetail).filter(models.UserDetail.user_id == user_details.user_id).first()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"User_details record for user_id {user_details.user_id} already exists."
+        )
     db.add(db_ud)
     db.commit()
     return db_ud
@@ -286,7 +479,7 @@ async def get_all_user_details_records(db: db_dependency):
 async def get_user_details_by_user_id(user_id : int, db:db_dependency):
     user_details = db.query(models.UserDetail).filter(models.UserDetail.user_id == user_id).all()
     if len(user_details) == 0:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='No user_details records matching this ID found')
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f'No user_details records matching the ID: {user_id} found')
     return user_details
 
 ## PUT ##
@@ -295,7 +488,7 @@ async def get_user_details_by_user_id(user_id : int, db:db_dependency):
 async def update_user(user_id : int, user_details : UserDetailsBase, db: db_dependency):
     db_user_details = db.query(models.UserDetail).filter(models.UserDetail.user_id == [user_id]).first()
     if db_user_details is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="The specified user_detail is not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"The specified user_detail for user_id {user_id} is not found")
     update_data = user_details.model_dump()
     for key, value in update_data.items():
         if value == None:
@@ -312,7 +505,7 @@ async def update_user(user_id : int, user_details : UserDetailsBase, db: db_depe
 async def delete_user_details(user_id : int, db: db_dependency):
     user_details = db.query(models.UserDetail).filter(models.UserDetail.user_id == user_id).first()
     if user_details is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="The specified user is not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"The specified user of user_id: {user_id} is not found")
     db.delete(user_details)
     db.commit()
 
@@ -323,9 +516,38 @@ async def delete_user_details(user_id : int, db: db_dependency):
 @app.post("/weather", status_code=status.HTTP_201_CREATED)
 async def create_weather(weather_details: WeatherInfoBase, db: db_dependency):
     db_weather = models.Weather(**weather_details.model_dump())
+    existing_weather = db.query(models.Weather).filter(models.Weather.date == weather_details.date).first()
+    if existing_weather:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Weather record for {weather_details.date} already exists."
+        )
     db.add(db_weather)
     db.commit()
-    return db_weather
+    return 'weather record added'
+
+@app.post("/weather/api", status_code=status.HTTP_201_CREATED)
+async def add_weather_from_api(info: WeatherAPIinfo, db: db_dependency):
+    existing_weather = db.query(models.Weather).filter(models.Weather.date == info.day).first()
+    if existing_weather:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Weather record for {info.day} already exists."
+        )
+    
+    response = requests.get(f'https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline/{info.city}/{info.day}?unitGroup={info.unit}&key={os.getenv('visualcrossing_api_key')}&include={info.type_data}&lang={info.lang}')
+    response_day_details = response.json()['days'][0]
+    
+    weather_info = WeatherInfoBase(
+        date = date.fromisoformat(response_day_details['datetime']),
+        temperatureMax = float(response_day_details['tempmax']),
+        windBearing = int(response_day_details['winddir']),
+        cloudCover = float(response_day_details['cloudcover']),
+        windSpeed = float(response_day_details['windspeed']),
+        humidity = float(response_day_details['humidity']),
+        day_time_minutes = int((pd.to_datetime(response_day_details['sunset']) - pd.to_datetime(response_day_details['sunrise'])).total_seconds() // 60)
+    )
+    return await create_weather(weather_info, db)
 
 ## GET ##
 
@@ -340,38 +562,16 @@ async def get_all_weather_records(db: db_dependency):
 async def get_user_details_by_user_id(date_ : date, db:db_dependency):
     wd = db.query(models.Weather).filter(models.Weather.date == date_).all()
     if len(wd) == 0:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='No weather records matching this ID found')
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f'No weather records matching the date: {date_} found')
     return wd
 
 ## PUT ##
 
 @app.put("/weather/{date}", status_code=status.HTTP_200_OK)
 async def update_user(date_ : date, weather_details : WeatherInfoUpBase, db: db_dependency):
-    season_dict = {1: 'Winter',
-               2: 'Winter',
-               3: 'Winter', 
-               4: 'Spring',
-               5: 'Spring',
-               6: 'Summer',
-               7: 'Summer',
-               8: 'Summer',
-               9: 'Summer',
-               10: 'Fall',
-               11: 'Fall',
-               12: 'Winter'}
-    weather_details.date = date_
     db_wds = db.query(models.Weather).filter(models.Weather.date == date_).first()
-    season = list(season_dict.values())[db_wds.date.month - 1]
     if db_wds is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="The specified weather data is not found")
-    update_data = weather_details.model_dump()
-    for key, value in update_data.items():
-        if season in key and 'season' in key:
-            setattr(db_wds, key, 1)
-        elif 'season' in key:
-            setattr(db_wds, key, 0)
-        else:
-            setattr(db_wds, key, value)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"The specified weather data for date {date_} is not found")
     db.commit()
     return db.query(models.Weather).filter(models.Weather.date == date_).first()
 
@@ -381,6 +581,7 @@ async def update_user(date_ : date, weather_details : WeatherInfoUpBase, db: db_
 async def delete_user_details(date_ : date, db: db_dependency):
     wd = db.query(models.Weather).filter(models.Weather.date == date_).first()
     if wd is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="The specified weather record is not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"The specified weather record for date {date_} is not found")
     db.delete(wd)
     db.commit()
+
