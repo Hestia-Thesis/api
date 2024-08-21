@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Depends, status
 from pydantic import BaseModel, ValidationError, model_validator
 from pydantic.functional_validators import AfterValidator
-from typing import Annotated
+from typing import Annotated, get_type_hints
 from typing_extensions import Self
 from database import engine, SessionLocal
 from sqlalchemy.orm import Session
@@ -12,12 +12,15 @@ from hashlib import sha3_512
 from fastapi.middleware.cors import CORSMiddleware
 import requests
 import pandas as pd
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from dotenv import load_dotenv
 import os
 import pickle
 from pathlib import Path
 import numpy as np
+from flask import Flask, request, jsonify, send_file
+from io import BytesIO
+from PIL import Image
 
 ## RECOMMENDATIONS FOR YARNI
 # 1. Always return something like the data/json obj or string
@@ -235,6 +238,45 @@ class WeatherAPIinfo:
     type_data: str = "days"
     lang: str = 'en'
     
+@dataclass
+class MLdata:
+    temperatureMax: float
+    windBearing: int
+    cloudCover: float
+    windSpeed: float
+    humidity: float
+    day_time_minutes: int
+    is_holiday: int
+    season_Fall: float
+    season_Spring: float
+    season_Summer: float
+    season_Winter: float
+
+    bedrooms: float | None = None
+    house_value: float | None = None
+    no_of_children: float | None = None
+    tot_ppl: float | None = None
+    employment_full_time_employee: float | None = None
+    employment_part_time_employee: float | None = None
+    employment_retired: float | None = None
+    employment_self_employed: float | None = None
+    employment_student: float | None = None
+    employment_unemployeed_seeking_work: float | None = None
+    family_structure_1_non_pensioner: float | None = None
+    family_structure_all_pensioners: float | None = None
+    family_structure_all_students: float | None = None
+    family_structure_couple_with_dependent_children: float | None = None
+    family_structure_other: float | None = None
+    family_structure_single_parent_dependent_children: float | None = None
+    savings_just_managing: float | None = None
+    savings_saving_a_lot: float | None = None
+    savings_saving_little: float | None = None
+    savings_using_savings_in_debt: float | None = None
+    house_type_bungalow: float | None = None
+    house_type_detached_house: float | None = None
+    house_type_flat_maisonette: float | None = None
+    house_type_semi_detached: float | None = None
+    house_type_terraced: float | None = None
 
 def get_db():
     db = SessionLocal()
@@ -340,48 +382,28 @@ async def add_predict_energy_consumption(energy : EnergyBase, db: db_dependency)
     ud_dt = UserDetailsBase.from_orm(user_detail).model_dump() if user_detail else {}
     # joining dicts
     combined_data = {**w_dt, **ud_dt}
+    ml_data_types = get_type_hints(MLdata)
 
-    # turning the inputs usable
-    field_names = [
-  "temperatureMax",
-  "windBearing",
-  "cloudCover",
-  "windSpeed",
-  "humidity",
-  "day_time_minutes",
-  "is_holiday",
-  "season_Fall",
-  "season_Spring",
-  "season_Summer",
-  "season_Winter",
-  "bedrooms",
-  "house_value",
-  "no_of_children",
-  "tot_ppl",
-  "employment_full_time_employee",
-  "employment_part_time_employee",
-  "employment_retired",
-  "employment_self_employed",
-  "employment_student",
-  "employment_unemployeed_seeking_work",
-  "family_structure_1_non_pensioner",
-  "family_structure_all_pensioners",
-  "family_structure_all_students",
-  "family_structure_couple_with_dependent_children",
-  "family_structure_other",
-  "family_structure_single_parent_dependent_children",
-  "savings_just_managing",
-  "savings_saving_a_lot",
-  "savings_saving_little",
-  "savings_using_savings_in_debt",
-  "house_type_bungalow",
-  "house_type_detached_house",
-  "house_type_flat_maisonette",
-  "house_type_semi_detached",
-  "house_type_terraced"
-]
-    combined_data = {key: value for key, value in combined_data.items() if key in field_names}
-
+    # Filter and cast the combined_data based on the field names and types in MLdata
+    filtered_casted_data = {}
+    
+    field_names = [field.name for field in fields(MLdata)]
+    for key in field_names:
+        if key in combined_data:
+            expected_type = ml_data_types.get(key)
+            if expected_type and combined_data[key] is not None:
+                try:
+                    # Convert value to the expected type
+                    filtered_casted_data[key] = expected_type(combined_data[key])
+                except (ValueError, TypeError):
+                    # Handle the case where casting fails (e.g., wrong data type)
+                    filtered_casted_data[key] = None  # or handle in another way
+            else:
+                # If the value is None or type not found, handle it
+                filtered_casted_data[key] = None
+        else:
+            # Set default value if key not found in combined_data
+            filtered_casted_data[key] = None
 
     # opening the model
     BASE_DIR = Path(__file__).resolve(strict=True).parent
@@ -389,8 +411,8 @@ async def add_predict_energy_consumption(energy : EnergyBase, db: db_dependency)
     with open(f'{BASE_DIR}\\random_forest_regressor_{__ml_version__}.pkl', 'rb') as m:
         ml_model = pickle.load(m)
 
-    # taking the prediction
-    prediction = ml_model.predict(np.array(list(combined_data.values())).reshape(1, -1))[0]
+    # Ensure the dict is ready for model prediction
+    prediction = ml_model.predict(np.array(list(filtered_casted_data.values())).reshape(1, -1))[0]
 
     energy.predicted = prediction
     db_energy = models.Energy(**energy.model_dump())
@@ -399,7 +421,7 @@ async def add_predict_energy_consumption(energy : EnergyBase, db: db_dependency)
     db.add(db_energy)
     db.commit()
     return energy
-    
+
 ## GET ##
 @app.get("/energy", status_code=status.HTTP_200_OK)
 async def get_all_energy_records(db: db_dependency):
