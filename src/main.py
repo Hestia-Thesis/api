@@ -368,7 +368,7 @@ async def add_predict_energy_consumption(energy : EnergyBase, db: db_dependency)
 
     # checking if the records exist
     if weather is None:
-        add_weather_from_api(WeatherAPIinfo(day=energy.day))
+        add_weather_from_api(WeatherAPIinfo(day=energy.day),db_dependency)
         weather = db.query(models.Weather).filter(models.Weather.date == energy.day).first()
 
     if user_detail is None:
