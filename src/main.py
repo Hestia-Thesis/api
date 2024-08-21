@@ -326,86 +326,87 @@ def create_story(prompt: str, word_count: int):
     genai.configure(api_key=os.getenv("gemini_api_key"))
 
     model = genai.GenerativeModel(model_name="gemini-1.5-flash")
-    response = model.generate_content([f'{prompt}, in {word_count} words and less than 20000 characters'])
+    response = model.generate_content([f'Can you make a story on: {prompt}, in {word_count} words and less than 20000 characters'])
     return response.text
 
 def get_prompts(percent: int):
     prompt_dict = {
         "significantly_more": {
             "story": [
-                "The energy crisis deepened, casting a shadow over the city. The streets, once bustling, now lay empty and silent.",
-                "As the energy consumption spiked beyond predictions, a wave of darkness spread across the city. The once vibrant neighborhoods were now desolate.",
-                "The overconsumption of energy led to an unsettling quiet. Buildings stood tall, but the lights that once filled them were dimmed.",
+                "The energy crisis deepened, casting a shadow over the city. The streets, once bustling, now lay empty and silent due to a complete lack of electricity.",
+                "The excessive energy consumption has accelerated climate change, leading to extreme weather events that devastated the city. Rising sea levels, scorching heatwaves, and violent storms has forced many residents to flee their homes.",
+                "As the world is almost out of electricity, energy black markets have started to show. Here people are kidnapped and the little charge produced in the brain from the neurons harvested.",
             ],
             "picture": [
-                "A cityscape under a darkened sky, with flickering streetlights and empty roads, conveying a sense of loss.",
-                "An abandoned urban scene, with low energy lighting and overcast skies, creating a somber mood.",
-                "A desolate city square, where only a few lights remain on, surrounded by encroaching darkness.",
+                "A cityscape under a night sky, with streetlights with no lights and empty roads, conveying a sense of loss.",
+                "A city being hit by a tsunami, there is thunder in the sky, we see the buildings slowly drowning in the ocean.",
+                "A person kidnapped and tied to a chair with a machine on their head, hands and legs are tied back. This person looks miserable",
             ]
         },
         "slightly_more": {
             "story": [
-                "The city managed to stay afloat, but the higher-than-expected energy usage caused some concern. The atmosphere was tense, and the people worried about what might come next.",
-                "Energy consumption was a bit higher than predicted, causing a slight strain on resources. The city remained functional, but the unease was palpable.",
-                "The energy usage exceeded predictions, but only slightly. There was still hope, but the city had to be cautious going forward.",
+                "We are running out of energy, we will not have enough to even turn on the lights if this continues. We need to stand in a line to get electricity token rations which is crazy expensive.",
+                "A group of hackers have infiltrated the city's energy infrastructure and stole valuable resources, causing disruptions.",
+                "The city is at the brink of energy crisis which is clear due to occassional power outages, we need to do something quick and save ourselves!",
             ],
             "picture": [
-                "A city with dimmed lights and a hint of weariness, as if pushing through a challenging day.",
-                "An urban landscape with some areas of reduced lighting, suggesting a slight strain on resources.",
+                "A house with dimmed lights while the other houses have lights at night.",
+                "A hacker with laptop on the table, it is dark everywhere, he has a smile on his face and on his screen we see he is transferring something to himself.",
                 "A twilight scene where the city is still active, but shadows are creeping in, hinting at underlying concerns.",
-            ]
-        },
-        "normal": {
-            "story": [
-                "The city's energy consumption matched the predictions, leading to a sense of stability. Life went on as usual, with everything functioning as expected.",
-                "Energy usage aligned perfectly with expectations, creating a balanced environment. The city operated smoothly, with no surprises in store.",
-                "With energy consumption exactly as predicted, the city maintained its rhythm. There was a calm in the air, as everything proceeded according to plan.",
-            ],
-            "picture": [
-                "A well-organized cityscape, with evenly lit streets and buildings, reflecting a sense of order and stability.",
-                "A balanced urban environment, where everything is in harmony, neither too bright nor too dim, showing a city at peace.",
-                "A typical day in the city, with steady traffic, clear skies, and a calm atmosphere, indicating normal operations.",
             ]
         },
         "slightly_less": {
             "story": [
-                "The energy usage was slightly below predictions, bringing a sense of relief to the city. People felt optimistic about the future, though they knew challenges remained.",
-                "With energy consumption just under the predicted levels, the city breathed a little easier. There was a subtle sense of accomplishment in the air.",
-                "Energy usage was slightly lower than expected, a small but welcome surprise. The city carried on with a renewed sense of confidence.",
+                "The city has achieved a delicate balance between energy consumption and sustainability. Residents are mindful of their energy usage, and renewable energy sources are being integrated into the grid.",
+                "A group of scientists and engineers are developing groundbreaking energy technologies that is promised to revolutionize the city's energy infrastructure.",
+                "Everyone in the city focused on sustainability. They shared knowledge, resources, and best practices for reducing their energy consumption.",
             ],
             "picture": [
-                "A well-lit cityscape, with a few areas of softer light, creating a calm and relaxed atmosphere.",
-                "An urban environment with bright skies and active streets, reflecting a positive but cautious mood.",
-                "A city square under a bright sky, with people moving about, feeling a bit more at ease than before.",
+                "A cityscape adorned with lush greenery, solar panels, and wind turbines, symbolizing a sustainable future.",
+                "A laboratory filled with scientists working on a new energy technology, representing innovation and progress.",
+                "A group of 4 people discussing all are smiling or laughing, there is a lot greenary around them.",
+            ]
+        },
+        "normal": {
+            "story": [
+                "A group of local entrepreneurs have developed innovative energy-saving technologies, which are being adopted by businesses and households throughout the city.",
+                "The family has recently moved into a new, energy-efficient home. They have installed solar panels on the roof, replaced their old appliances with energy-saving models, and planted a vegetable garden to reduce their carbon footprint. Their monthly energy bills are significantly lower than their previous home.",
+                "The residents have started a community garden. We use solar-powered lights to illuminate the garden at night and collect rainwater for irrigation.",
+            ],
+            "picture": [
+                "A laboratory showcasing a new energy-saving technology, representing the city's commitment to progress.",
+                "A house with a garden where there are a lot of vegetable plants, mosses on the walls, it is a sunny day",
+                "A lot of people in a big garden planting plants on a sunny day.",
             ]
         },
         "significantly_less": {
             "story": [
-                "The city's energy consumption remained in harmony with predictions, allowing life to continue flourishing. Streets were filled with light and laughter.",
-                "With energy usage perfectly managed, the city thrived. Parks were green, and the night sky was clear, dotted with stars.",
-                "Thanks to efficient energy management, the city continued to glow. People enjoyed the balance, and the atmosphere was lively and hopeful.",
+                "The city had achieved a state of energy abundance, thanks to a combination of renewable energy sources and efficient practices. Residents enjoyed a high quality of life, free from the worries of energy shortages.",
+                "The city had become completely self-sufficient in terms of energy production. It was a shining example of sustainable living, inspiring other cities to follow suit.",
+                "The city was a leader in energy innovation, developing cutting-edge technologies that are being adopted by cities around the world.",
             ],
             "picture": [
-                "A bright and bustling city, filled with well-lit streets, lively crowds, and clear skies, signifying a thriving environment.",
-                "A vibrant urban park, bathed in sunlight, with people enjoying a day out, surrounded by energy-efficient buildings.",
-                "A picturesque city at night, with glowing streetlights, a starry sky, and a sense of peace and prosperity.",
+                "A cityscape in sunlight, tall trees, houses on the trees and with renewable energy sources powering the city's infrastructure.",
+                "A city with thriving green spaces, clean air, and happy, healthy residents, representing the ideal of a sustainable future.",
+                "A picturesque city at night, with glowing insets everywhere, happy people, a clear sky with a lot of stars that look like diamonds in the sky, a lot of trees.",
             ]
         }
     }
 
-    if percent > 25:  # Significantly more
+    if percent > 25:  
         scenario = "significantly_more"
-    elif 15 < percent <= 25:  # Slightly more
+    elif 15 < percent <= 25: 
         scenario = "slightly_more"
-    elif -15 <= percent <= 15:  # Normal consumption
+    elif -15 <= percent <= 15:
         scenario = "normal"
-    elif -25 < percent < -15:  # Slightly less
+    elif -25 < percent < -15: 
         scenario = "slightly_less"
-    else:  # Significantly less
+    else:
         scenario = "significantly_less"
+    random_index = random.randint(0, (len(prompt_dict[scenario]["story"]) - 1))
     return {
-        'story_prompt': random.choice(prompt_dict[scenario]["story"]),
-        'picture_prompt': random.choice(prompt_dict[scenario]["picture"])
+        'story_prompt': prompt_dict[scenario]["story"][random_index],
+        'picture_prompt': prompt_dict[scenario]["picture"][random_index]
     }
 
 ## POST ##
@@ -419,9 +420,7 @@ async def create_img_story(energy_details: EnergyBase, db: db_dependency, end_da
         models.ImageStories.user_id == energy_details.user_id,
         models.ImageStories.end_date == end_date 
     )).all()
-    print([existing, energy_details.day, energy_details.user_id, end_date])
     if existing:
-        print('here')
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Images and stories for the user_id {energy_details.user_id} for the date range {energy_details.day} - {end_date} already exists."
