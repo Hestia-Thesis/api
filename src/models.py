@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, Integer, String, DateTime, ForeignKey, Float, Date
+from sqlalchemy import Boolean, Column, Integer, String, DateTime, ForeignKey, Float, Date, LargeBinary
 from database import Base
 
 
@@ -18,9 +18,6 @@ class Energy(Base):
     day = Column(Date, primary_key=True)
     consumed = Column(Integer)
     predicted = Column(Integer, nullable=True)
-
-### FOR POSSIBLE TYPES TO USE UNDER THIS COMMENT CHECK IMPORTS FROM 'sqlalchemy'
-### EVERYTHING INSIDE [] U NEED TO CHANGE TO UR NEEDS
 
 class UserDetail(Base):
     __tablename__ = 'user_details'
@@ -67,3 +64,12 @@ class Weather(Base):
     season_Spring = Column(Float, nullable=True)
     season_Summer = Column(Float, nullable=True)
     season_Winter = Column(Float, nullable=True)
+
+class ImageStories(Base):
+    __tablename__ = 'images_story'
+    
+    user_id = Column(Integer, ForeignKey(User.user_id), primary_key=True)
+    date = Column(Date, primary_key=True)
+    end_date = Column(Date, primary_key=True, nullable=True)
+    image_data = Column(LargeBinary(length=(2**32)-1))
+    story = Column(String(20000))

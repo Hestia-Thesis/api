@@ -18,9 +18,10 @@ import os
 import pickle
 from pathlib import Path
 import numpy as np
-from flask import Flask, request, jsonify, send_file
-from io import BytesIO
-from PIL import Image
+import base64
+import google.generativeai as genai
+##pip install google-generativeai
+import random
 
 ## RECOMMENDATIONS FOR YARNI
 # 1. Always return something like the data/json obj or string
@@ -229,6 +230,20 @@ class WeatherInfoUpBase(BaseModel):
 
         return values
 
+class ImageStoriesUpBase(BaseModel):
+    user_id: int
+    end_date: date | None = None
+    date: date
+    image_data: bytes | None = None
+    story: str | None = None
+
+class ImageStoriesBase(BaseModel):
+    user_id: int
+    end_date: date | None = None
+    date: date
+    image_data: bytes
+    story: str
+
 @dataclass
 class WeatherAPIinfo:
     day: date
@@ -291,6 +306,223 @@ db_dependency = Annotated[Session, Depends(get_db)]
 
 #### ENDPOINTS #####
 
+### IMAGE-STORY ENDPOINTS ###
+## HELPER FUNCTIONS
+def create_image(prompt: str, style: str = 'anime'):
+    API_URL = "https://api-inference.huggingface.co/models/prompthero/openjourney-v4"
+    headers = {"Authorization": f"Bearer {os.getenv('huggingface_access_token_write')}"}
+
+    def query(payload):
+        response = requests.post(API_URL, headers=headers, json=payload)
+        return response.content
+    image_bytes = query({
+        "inputs": f'{prompt}, in {style} style',
+    })
+
+    return image_bytes
+
+def create_story(prompt: str, word_count: int):
+
+    genai.configure(api_key=os.getenv("gemini_api_key"))
+
+    model = genai.GenerativeModel(model_name="gemini-1.5-flash")
+    response = model.generate_content([f'{prompt}, in {word_count} words and less than 20000 characters'])
+    story_pm = StoryBase(
+        story=response.text
+    )
+    return response.text
+    db_str = models.Stories(**story_pm.model_dump())
+    db.add(db_str)
+    db.commit()
+
+def get_prompts(percent: int):
+    prompt_dict = {
+        "significantly_more": {
+            "story": [
+                "The energy crisis deepened, casting a shadow over the city. The streets, once bustling, now lay empty and silent.",
+                "As the energy consumption spiked beyond predictions, a wave of darkness spread across the city. The once vibrant neighborhoods were now desolate.",
+                "The overconsumption of energy led to an unsettling quiet. Buildings stood tall, but the lights that once filled them were dimmed.",
+            ],
+            "picture": [
+                "A cityscape under a darkened sky, with flickering streetlights and empty roads, conveying a sense of loss.",
+                "An abandoned urban scene, with low energy lighting and overcast skies, creating a somber mood.",
+                "A desolate city square, where only a few lights remain on, surrounded by encroaching darkness.",
+            ]
+        },
+        "slightly_more": {
+            "story": [
+                "The city managed to stay afloat, but the higher-than-expected energy usage caused some concern. The atmosphere was tense, and the people worried about what might come next.",
+                "Energy consumption was a bit higher than predicted, causing a slight strain on resources. The city remained functional, but the unease was palpable.",
+                "The energy usage exceeded predictions, but only slightly. There was still hope, but the city had to be cautious going forward.",
+            ],
+            "picture": [
+                "A city with dimmed lights and a hint of weariness, as if pushing through a challenging day.",
+                "An urban landscape with some areas of reduced lighting, suggesting a slight strain on resources.",
+                "A twilight scene where the city is still active, but shadows are creeping in, hinting at underlying concerns.",
+            ]
+        },
+        "normal": {
+            "story": [
+                "The city's energy consumption matched the predictions, leading to a sense of stability. Life went on as usual, with everything functioning as expected.",
+                "Energy usage aligned perfectly with expectations, creating a balanced environment. The city operated smoothly, with no surprises in store.",
+                "With energy consumption exactly as predicted, the city maintained its rhythm. There was a calm in the air, as everything proceeded according to plan.",
+            ],
+            "picture": [
+                "A well-organized cityscape, with evenly lit streets and buildings, reflecting a sense of order and stability.",
+                "A balanced urban environment, where everything is in harmony, neither too bright nor too dim, showing a city at peace.",
+                "A typical day in the city, with steady traffic, clear skies, and a calm atmosphere, indicating normal operations.",
+            ]
+        },
+        "slightly_less": {
+            "story": [
+                "The energy usage was slightly below predictions, bringing a sense of relief to the city. People felt optimistic about the future, though they knew challenges remained.",
+                "With energy consumption just under the predicted levels, the city breathed a little easier. There was a subtle sense of accomplishment in the air.",
+                "Energy usage was slightly lower than expected, a small but welcome surprise. The city carried on with a renewed sense of confidence.",
+            ],
+            "picture": [
+                "A well-lit cityscape, with a few areas of softer light, creating a calm and relaxed atmosphere.",
+                "An urban environment with bright skies and active streets, reflecting a positive but cautious mood.",
+                "A city square under a bright sky, with people moving about, feeling a bit more at ease than before.",
+            ]
+        },
+        "significantly_less": {
+            "story": [
+                "The city's energy consumption remained in harmony with predictions, allowing life to continue flourishing. Streets were filled with light and laughter.",
+                "With energy usage perfectly managed, the city thrived. Parks were green, and the night sky was clear, dotted with stars.",
+                "Thanks to efficient energy management, the city continued to glow. People enjoyed the balance, and the atmosphere was lively and hopeful.",
+            ],
+            "picture": [
+                "A bright and bustling city, filled with well-lit streets, lively crowds, and clear skies, signifying a thriving environment.",
+                "A vibrant urban park, bathed in sunlight, with people enjoying a day out, surrounded by energy-efficient buildings.",
+                "A picturesque city at night, with glowing streetlights, a starry sky, and a sense of peace and prosperity.",
+            ]
+        }
+    }
+
+    if percent > 25:  # Significantly more
+        scenario = "significantly_more"
+    elif 15 < percent <= 25:  # Slightly more
+        scenario = "slightly_more"
+    elif -15 <= percent <= 15:  # Normal consumption
+        scenario = "normal"
+    elif -25 < percent < -15:  # Slightly less
+        scenario = "slightly_less"
+    else:  # Significantly less
+        scenario = "significantly_less"
+    return {
+        'story_prompt': random.choice(prompt_dict[scenario]["story"]),
+        'picture_prompt': random.choice(prompt_dict[scenario]["picture"])
+    }
+
+## POST ##
+
+@app.post("/img_story", status_code=status.HTTP_201_CREATED)
+async def create_img_story(energy_details: EnergyBase, db: db_dependency, end_date: date = None, style: str = 'anime', word_count: int = 100):
+    end_date = end_date or energy_details.day
+    
+    existing = db.query(models.ImageStories).filter(and_(
+        models.ImageStories.date == energy_details.day,
+        models.ImageStories.user_id == energy_details.user_id,
+        models.ImageStories.end_date == end_date 
+    )).all()
+    print([existing, energy_details.day, energy_details.user_id, end_date])
+    if existing:
+        print('here')
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Images and stories for the user_id {energy_details.user_id} for the date range {energy_details.day} - {end_date} already exists."
+        )
+    ## calculating percentage difference and getting prompts
+    percent_difference = ((energy_details.consumed - energy_details.predicted) / energy_details.predicted ) * 100
+    prompts = get_prompts(percent_difference)
+
+    ## creating image and story
+    img_data = create_image(prompts['picture_prompt'], style=style)
+    img = base64.b64encode(img_data).decode('utf-8')
+    story = create_story(prompts['story_prompt'], word_count=word_count)
+
+    ## adding it to the db
+    img_story = ImageStoriesBase(
+        user_id=energy_details.user_id,
+        end_date = end_date,
+        date = energy_details.day,
+        image_data=img, 
+        story=story)
+    db_img_story = models.ImageStories(**img_story.model_dump())
+    db.add(db_img_story)
+    db.commit()
+    return img_story
+    
+## GET ##
+
+@app.get("/img_story", status_code=status.HTTP_200_OK)
+async def get_all_img_story(db: db_dependency):
+    img_story = db.query(models.ImageStories).all()
+    if len(img_story) == 0:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='No images and stories found')
+    return img_story
+
+@app.get("/img_story/{user_id}", status_code=status.HTTP_200_OK)
+async def get_all_img_story(user_id: int, db: db_dependency):
+    img_story = db.query(models.ImageStories).filter(models.ImageStories.user_id == user_id).all()
+    if len(img_story) == 0:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f'No images and stories with user_id: {img_story.user_id} found')
+    return img_story
+
+@app.get("/img_story/{date}", status_code=status.HTTP_200_OK)
+async def get_all_img_story(date: date, db: db_dependency):
+    img_story = db.query(models.ImageStories).filter(models.ImageStories.date == date).all()
+    if len(img_story) == 0:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f'No images and stories with date {img_story.date} found')
+    return img_story
+
+@app.get("/img_story/{user_id}/{date}", status_code=status.HTTP_200_OK)
+async def get_all_img_story(user_id: int, date: date, db: db_dependency):
+    img_story = db.query(models.ImageStories).filter(and_(
+        models.ImageStories.date == date,
+        models.ImageStories.user_id == user_id
+    )).all()
+    if len(img_story) == 0:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f'No images and stories with user_id: {img_story.user_id}, date {img_story.date} found')
+    return img_story
+
+@app.get("/img_story/{user_id}/{date}/{end_date}", status_code=status.HTTP_200_OK)
+async def get_all_img_story(user_id: int, date: date, end_date: date,db: db_dependency):
+    img_story = db.query(models.ImageStories).filter(and_(
+        models.ImageStories.date == date,
+        models.ImageStories.user_id == user_id,
+        models.ImageStories.end_date == end_date
+    )).all()
+    if len(img_story) == 0:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f'No images and stories with user_id: {img_story.user_id}, in range {img_story.date} - {img_story.end_date} found')
+    return img_story
+
+## DELETE ##
+@app.delete("/img_story/{user_id}", status_code=status.HTTP_200_OK)
+async def delete_user(img_story : ImageStoriesBase, db : db_dependency):
+    records = db.query(models.ImageStories).filter(
+            models.ImageStories.user_id == img_story.user_id
+        ).all()
+    if records is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No record with the user_id: {img_story.user_id} found")
+    for record in records:
+        db.delete(record)
+    db.commit()
+
+@app.delete("/img_story/{user_id}/{date}/{end_date}", status_code=status.HTTP_200_OK)
+async def delete_record(img_story : ImageStoriesUpBase, db : db_dependency):
+    record = db.query(models.ImageStories).filter(and_(
+            models.ImageStories.user_id == img_story.user_id,
+            models.ImageStories.date == img_story.date,
+            models.ImageStories.end_date == img_story.end_date
+        )
+        ).first()
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No record with the user_id: {img_story.user_id}, in range {img_story.date} - {img_story.end_date} found")
+    db.delete(record)
+    db.commit()
+
+
 ### USER ENDPOINTS ###
 
 ## POST ##
@@ -336,6 +568,39 @@ async def delete_user(user_id : int, db : db_dependency):
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No user matching this ID found")
     db.delete(user)
+    db.commit()
+
+@app.delete("/users/all_info/{user_id}", status_code=status.HTTP_200_OK)
+async def delete_user(user_id : int, db : db_dependency):
+
+    # Energy
+    energy_rec = db.query(models.Energy).filter(models.Energy.user_id == user_id).all()
+    if energy_rec is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="The specified energy records are not found")
+    for record in energy_rec:
+        db.delete(record)
+
+    # Img_stories
+    records = db.query(models.ImageStories).filter(
+        models.ImageStories.user_id == user_id
+    ).all()
+    if records is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No user with the user_id: {user_id} found")
+    for record in records:
+        db.delete(record)
+
+    # UserDetail
+    user_details = db.query(models.UserDetail).filter(models.UserDetail.user_id == user_id).first()
+    if user_details is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"The specified user of user_id: {user_id} is not found")
+    db.delete(user_details)
+        
+    # User
+    user = db.query(models.User).filter(models.User.user_id == user_id).first()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No user matching this ID found")
+    db.delete(user)
+
     db.commit()
 
 
@@ -434,7 +699,7 @@ async def get_all_energy_records(db: db_dependency):
 async def get_energy_by_user_id(user_id : int, db:db_dependency):
     energy = db.query(models.Energy).filter(models.Energy.user_id == user_id).all()
     if len(energy) == 0:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='No energy records matching this ID found')
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f'No energy records matching this ID {user_id} found')
     return energy
 
 ## PUT ##
@@ -442,16 +707,9 @@ async def get_energy_by_user_id(user_id : int, db:db_dependency):
 @app.put("/energy/{user_id}/{day}", status_code=status.HTTP_200_OK)
 async def update_energy_record(user_id : int, day : date, energy : EnergyUpdate, db: db_dependency):
     energy.day = day
-# @app.put("/energy/{user_id}/{year}/{month}", status_code=status.HTTP_200_OK)
-# async def update_energy_record(user_id : int, year: int, month: int, energy : EnergyUpdate, db: db_dependency):
-#     db_energy = db.query(models.Energy).filter(models.Energy.user_id == user_id, models.Energy.year == year, models.Energy.month == month).first()
     db_energy = db.query(models.Energy).filter(models.Energy.user_id == user_id, models.Energy.day == day).first()
     if db_energy is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="The specified energy record is not found")
-    # if energy.month is not None:
-    #     db_energy.month = energy.month
-    # if energy.year is not None:
-    #     db_energy.year = energy.year
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"The specified energy record for user_id: {user_id} and date {day} is not found")
     if energy.day is not None:
         db_energy.day = energy.day
     if energy.consumed is not None:
@@ -465,16 +723,24 @@ async def update_energy_record(user_id : int, day : date, energy : EnergyUpdate,
 
 @app.delete("/energy/{user_id}/{day}", status_code=status.HTTP_200_OK)
 async def delete_energy_record(user_id : int, day: date, db: db_dependency):
-# @app.delete("/energy/{user_id}/{year}/{month}", status_code=status.HTTP_200_OK)
-# async def delete_energy_record(user_id : int, year: int, month: int, db: db_dependency):
-    # energy = db.query(models.Energy).filter(models.Energy.user_id == user_id, models.Energy.year == year, models.Energy.month == month).first()
-    energy = db.query(models.Energy).filter(models.Energy.user_id == user_id, models.Energy.day == day).first()
+    energy = db.query(models.Energy).filter(and_(models.Energy.user_id == user_id, models.Energy.day == day)).first()
 
     if energy is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="The specified energy record is not found")
     db.delete(energy)
     db.commit()
 
+@app.delete("/energy/{user_id}", status_code=status.HTTP_200_OK)
+async def delete_energy_user(user_id : int, day: date, db: db_dependency):
+    energy = db.query(models.Energy).filter(models.Energy.user_id == user_id).all()
+
+    if energy is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="The specified energy record is not found")
+    
+    for record in energy:
+        db.delete(record)
+
+    db.commit()
 
 ### USER DETAILS ENDPOINTS ###
 
