@@ -327,13 +327,7 @@ def create_story(prompt: str, word_count: int):
 
     model = genai.GenerativeModel(model_name="gemini-1.5-flash")
     response = model.generate_content([f'{prompt}, in {word_count} words and less than 20000 characters'])
-    story_pm = StoryBase(
-        story=response.text
-    )
     return response.text
-    db_str = models.Stories(**story_pm.model_dump())
-    db.add(db_str)
-    db.commit()
 
 def get_prompts(percent: int):
     prompt_dict = {
