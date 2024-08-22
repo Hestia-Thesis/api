@@ -69,7 +69,7 @@ class EnergyBase(BaseModel):
         except Exception as e:
             raise e
         current_date = date.today()
-        if given_date >= current_date:
+        if given_date > current_date:
             raise ValueError('The given date must in the past')
         minimum_date = date(year= current_date.year-4, month= current_date.month, day=current_date.day)
         if given_date < minimum_date:
