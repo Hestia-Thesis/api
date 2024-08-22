@@ -5,7 +5,7 @@ from typing import Annotated, get_type_hints
 from typing_extensions import Self
 from database import engine, SessionLocal
 from sqlalchemy.orm import Session
-from sqlalchemy import and_
+from sqlalchemy import and_, extract
 import models
 from datetime import date, datetime
 from hashlib import sha3_512
@@ -22,6 +22,7 @@ import base64
 import google.generativeai as genai
 ##pip install google-generativeai
 import random
+import calendar
 
 ## RECOMMENDATIONS FOR YARNI
 # 1. Always return something like the data/json obj or string
@@ -58,17 +59,15 @@ class UserUpdate(BaseModel):
 class EnergyBase(BaseModel):
     user_id : int
     day: date
-    consumed : int
-    predicted : int
+    consumed : float
+    predicted : float
 
     @model_validator(mode='after')
     def check_date_range(self) -> Self:
         try:
-            # given_date = date(year=self.year,month=self.month,day=1)
             given_date = self.day
         except Exception as e:
             raise e
-        # current_date = date(year = date.today().year, month = date.today().month, day = 1)
         current_date = date.today()
         if given_date >= current_date:
             raise ValueError('The given date must in the past')
@@ -78,20 +77,16 @@ class EnergyBase(BaseModel):
         return self
 
 class EnergyUpdate(BaseModel):
-    # month : int | None = None
-    # year : int | None = None
     day: date | None = None
-    consumed : int | None = None
-    predicted : int | None = None
+    consumed : float | None = None
+    predicted : float | None = None
 
     @model_validator(mode='after')
     def check_date_range(self) -> Self:
         try:
-            # given_date = date(year=self.year,month=self.month,day=1)
             given_date = self.day
         except Exception as e:
             raise e
-        # current_date = date(year = date.today().year, month = date.today().month, day = 1)
         current_date = date.today()
         if given_date is not None:
             if given_date >= current_date:
@@ -312,12 +307,10 @@ def create_image(prompt: str, style: str = 'anime'):
     API_URL = "https://api-inference.huggingface.co/models/prompthero/openjourney-v4"
     headers = {"Authorization": f"Bearer {os.getenv('huggingface_access_token_write')}"}
 
-    def query(payload):
-        response = requests.post(API_URL, headers=headers, json=payload)
-        return response.content
-    image_bytes = query({
+    payload = {
         "inputs": f'{prompt}, in {style} style',
-    })
+    }
+    image_bytes = requests.post(API_URL, headers=headers, json=payload).content
 
     return image_bytes
 
@@ -491,6 +484,7 @@ async def get_all_img_story(user_id: int, date: date, end_date: date,db: db_depe
     return img_story
 
 ## DELETE ##
+
 @app.delete("/img_story/{user_id}", status_code=status.HTTP_200_OK)
 async def delete_user(img_story : ImageStoriesBase, db : db_dependency):
     records = db.query(models.ImageStories).filter(
@@ -572,6 +566,7 @@ async def delete_user(user_id : int, db : db_dependency):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="The specified energy records are not found")
     for record in energy_rec:
         db.delete(record)
+    db.commit()
 
     # Img_stories
     records = db.query(models.ImageStories).filter(
@@ -581,12 +576,15 @@ async def delete_user(user_id : int, db : db_dependency):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No user with the user_id: {user_id} found")
     for record in records:
         db.delete(record)
+    db.commit()
 
     # UserDetail
     user_details = db.query(models.UserDetail).filter(models.UserDetail.user_id == user_id).first()
     if user_details is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"The specified user of user_id: {user_id} is not found")
     db.delete(user_details)
+    db.commit()
+
         
     # User
     user = db.query(models.User).filter(models.User.user_id == user_id).first()
@@ -598,32 +596,12 @@ async def delete_user(user_id : int, db : db_dependency):
 
 
 ### ENERGY ENDPOINTS ###
-
-## POST ##
-@app.post("/energy", status_code=status.HTTP_201_CREATED)
-async def add_energy_consumption(energy : EnergyBase, db: db_dependency):
-    db_energy = models.Energy(**energy.model_dump())
-    db.add(db_energy)
-    db.commit()
-    
-@app.post("/energy/ml", status_code=status.HTTP_201_CREATED)
-async def add_predict_energy_consumption(energy : EnergyBase, db: db_dependency):
-    ## checking if a record already exists
-    existing = db.query(models.Energy).filter(and_(
-        models.Energy.day == energy.day,
-        models.Energy.user_id == energy.user_id
-        )).first()
-    if existing:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Energy record for user_id {energy.user_id} on {energy.day} already exists."
-        )
-
+## HELPER FUNCTIONS ##
+def get_prediction(energy:EnergyBase, db: db_dependency):
     ## creating input fields for the model
     # taking inputs
     weather = db.query(models.Weather).filter(models.Weather.date == energy.day).first()
     user_detail = db.query(models.UserDetail).filter(models.UserDetail.user_id == energy.user_id).first()
-
     # checking if the records exist
     if weather is None:
         add_weather_from_api(WeatherAPIinfo(day=energy.day),db_dependency)
@@ -670,15 +648,79 @@ async def add_predict_energy_consumption(energy : EnergyBase, db: db_dependency)
         ml_model = pickle.load(m)
 
     # Ensure the dict is ready for model prediction
-    prediction = ml_model.predict(np.array(list(filtered_casted_data.values())).reshape(1, -1))[0]
+    return ml_model.predict(np.array(list(filtered_casted_data.values())).reshape(1, -1))[0]
 
-    energy.predicted = prediction
+## POST ##
+@app.post("/energy", status_code=status.HTTP_201_CREATED)
+async def add_energy_consumption(energy : EnergyBase, db: db_dependency):
+    db_energy = models.Energy(**energy.model_dump())
+    db.add(db_energy)
+    db.commit()
+    
+@app.post("/energy/ml", status_code=status.HTTP_201_CREATED)
+async def add_predict_energy_consumption(energy : EnergyBase, db: db_dependency):
+    ## checking if a record already exists
+    existing = db.query(models.Energy).filter(and_(
+        models.Energy.day == energy.day,
+        models.Energy.user_id == energy.user_id
+        )).first()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Energy record for user_id {energy.user_id} on {energy.day} already exists."
+        )
+
+    energy.predicted = get_prediction(energy, db)
     db_energy = models.Energy(**energy.model_dump())
     
     # adding data to db
     db.add(db_energy)
     db.commit()
     return energy
+
+@app.post("/energy/ml/monthly", status_code=status.HTTP_201_CREATED)
+async def add_predict_energy_consumption_month(energy : EnergyBase, db: db_dependency):
+    _, total_days = calendar.monthrange(energy.day.year, energy.day.month)
+    consumption_per_day = energy.consumed / total_days
+    energy_records = []
+    for day in range(1, total_days+1):
+        try:
+            existing = db.query(models.Energy).filter(and_(
+                models.Energy.day == energy.day,
+                models.Energy.user_id == energy.user_id
+                )).first()
+            if existing:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Energy record for user_id {energy.user_id} on {energy.day} already exists."
+                )
+
+            energy_pm = EnergyBase(
+                    user_id=energy.user_id,
+                    day=energy.day.replace(day=day),
+                    consumed=consumption_per_day,
+                    predicted=0
+                )
+            energy_pm.predicted = get_prediction(energy_pm, db)
+            energy_records.append(energy_pm)
+        
+        except ValidationError as ve:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Validation error for day {day}: {ve.errors()}"
+            )
+        
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"An unexpected error occurred for day {day}: {str(e)}"
+            )
+
+    # adding data to db
+    db_energy = [models.Energy(**record.model_dump()) for record in energy_records]
+    db.add_all(db_energy)
+    db.commit()
+    return energy_records
 
 ## GET ##
 @app.get("/energy", status_code=status.HTTP_200_OK)
@@ -693,6 +735,18 @@ async def get_energy_by_user_id(user_id : int, db:db_dependency):
     energy = db.query(models.Energy).filter(models.Energy.user_id == user_id).all()
     if len(energy) == 0:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f'No energy records matching this ID {user_id} found')
+    return energy
+
+@app.get("/energy/{user_id}/monthly", status_code=status.HTTP_200_OK)
+async def get_energy_by_user_id_month(user_id : int, month: int, year: int,  db:db_dependency):
+    energy = db.query(models.Energy).filter(and_(
+        models.Energy.user_id == user_id,
+        extract('year', models.Energy.day) == year,
+        extract('month', models.Energy.day) == month
+        )
+    ).all(),
+    if len(energy) == 0:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f'No energy records matching this ID {user_id} for {month}/{year} found')
     return energy
 
 ## PUT ##

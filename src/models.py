@@ -13,11 +13,9 @@ class Energy(Base):
     __tablename__ = 'energy_consumption'
 
     user_id = Column(Integer, ForeignKey(User.user_id) , primary_key=True)
-    # month = Column(Integer, primary_key=True)
-    # year = Column(Integer, primary_key=True)
     day = Column(Date, primary_key=True)
-    consumed = Column(Integer)
-    predicted = Column(Integer, nullable=True)
+    consumed = Column(Float)
+    predicted = Column(Float, nullable=True)
 
 class UserDetail(Base):
     __tablename__ = 'user_details'
