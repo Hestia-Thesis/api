@@ -24,8 +24,8 @@ import google.generativeai as genai
 import random
 import calendar
 import json
-from database import get_db
-from schemas import *
+from src.database import get_db
+from src.schemas import *
 
 ## RECOMMENDATIONS FOR YARNI
 # 1. Always return something like the data/json obj or string
@@ -34,7 +34,7 @@ from schemas import *
 #   add {} dynamic code to make msgs more reading
 # 3. when doing @post if the data already exists send a error msg
 
-load_dotenv(dotenv_path='../../.env', verbose=True)
+load_dotenv(dotenv_path='../.env', verbose=True)
 app = FastAPI()
 __ml_version__ = '0.1.1'
 
@@ -414,7 +414,7 @@ async def add_energy_consumption(energy : EnergyBase, db: db_dependency):
     db.commit()
     
 @app.post("/energy/ml", status_code=status.HTTP_201_CREATED)
-async def add_predict_energy_consumption(energy : EnergyBase, db: db_dependency):
+async def add_predict_energy_consumption(energy : EnergyBase, db: db_dependency, img_style:str = 'anime', word_count: int = 100):
     ## checking if a record already exists
     existing = db.query(models.Energy).filter(and_(
         models.Energy.day == energy.day,
@@ -432,7 +432,12 @@ async def add_predict_energy_consumption(energy : EnergyBase, db: db_dependency)
     # adding data to db
     db.add(db_energy)
     db.commit()
-    return energy
+    # create_img_story(energy_details: EnergyBase, db: db_dependency, end_date: date = None, style: str = 'anime', word_count: int = 100)
+    img_tb = create_img_story(energy_details=energy, db=db_dependency, style=img_style, word_count=word_count)
+    return {
+        'energy_table': energy,
+        'image_story_table': img_tb
+        }
 
 @app.post("/energy/ml/monthly", status_code=status.HTTP_201_CREATED)
 async def add_predict_energy_consumption_month(energy : EnergyBase, db: db_dependency):
