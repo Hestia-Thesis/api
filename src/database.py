@@ -1,11 +1,26 @@
+import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.ext.declarative import declarative_base
+from dotenv import load_dotenv
+from models import Base  
 
-URL_DATABASE = 'mysql+pymysql://root:root@localhost:3306/Hestia'
 
-engine = create_engine(URL_DATABASE)
+load_dotenv(dotenv_path='../../.env', verbose=True)
 
-SessionLocal = sessionmaker(autocommit=False, autoflush= False, bind=engine)
+DATABASE_URL = os.getenv("DB_URL")
 
-Base = declarative_base()
+engine = create_engine(DATABASE_URL)
+Base.metadata.create_all(bind=engine)
+
+# Create the session factory
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# Create all tables in the database
+Base.metadata.create_all(bind=engine)
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
