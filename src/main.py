@@ -157,7 +157,7 @@ def get_prompts(percent: int):
 
 ## POST ##
 
-@app.post("/img_story", status_code=status.HTTP_201_CREATED)
+@app.post("/img_story/{word_count}", status_code=status.HTTP_201_CREATED)
 async def create_img_story(energy_details: EnergyBase, db: db_dependency, end_date: date = None, style: str = 'anime', word_count: int = 1000):
     end_date = end_date or energy_details.day
     
