@@ -26,6 +26,7 @@ import calendar
 import json
 from database import get_db
 from schemas import *
+import torch
 
 ## RECOMMENDATIONS FOR YARNI
 # 1. Always return something like the data/json obj or string
@@ -193,6 +194,7 @@ async def create_img_story(energy_details: EnergyBase, db: db_dependency, end_da
         db_img_story = models.ImageStories(**img_story.model_dump())
         db.add(db_img_story)
         db.commit()
+        torch.cuda.empty_cache()
         return img_story
     
 ## GET ##
