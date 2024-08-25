@@ -619,7 +619,7 @@ async def get_user_details_by_user_id(user_id : int, db:db_dependency):
 
 @app.put("/user_details/{user_id}", status_code=status.HTTP_200_OK)
 async def update_user(user_id : int, user_details : UserDetailsBase, db: db_dependency):
-    db_user_details = db.query(models.UserDetail).filter(models.UserDetail.user_id == [user_id]).first()
+    db_user_details = db.query(models.UserDetail).filter(models.UserDetail.user_id == user_id).first()
     if db_user_details is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"The specified user_detail for user_id {user_id} is not found")
     update_data = user_details.model_dump()
