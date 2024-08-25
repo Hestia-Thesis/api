@@ -40,7 +40,7 @@ __ml_version__ = '0.1.1'
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://hestiastory.netlify.app"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"]
