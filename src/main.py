@@ -608,7 +608,7 @@ async def get_all_user_details_records(db: db_dependency):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='No user_details records found')
     return user_details
 
-@app.get("/user_details{user_id}", status_code=status.HTTP_200_OK)
+@app.get("/user_details/{user_id}", status_code=status.HTTP_200_OK)
 async def get_user_details_by_user_id(user_id : int, db:db_dependency):
     user_details = db.query(models.UserDetail).filter(models.UserDetail.user_id == user_id).all()
     if len(user_details) == 0:
@@ -691,7 +691,7 @@ async def get_all_weather_records(db: db_dependency):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='No weather records found')
     return wd
 
-@app.get("/weather{date}", status_code=status.HTTP_200_OK)
+@app.get("/weather/{date}", status_code=status.HTTP_200_OK)
 async def get_user_details_by_user_id(date_ : date, db:db_dependency):
     wd = db.query(models.Weather).filter(models.Weather.date == date_).all()
     if len(wd) == 0:
