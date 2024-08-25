@@ -446,7 +446,7 @@ async def add_energy_consumption(energy : EnergyBase, db: db_dependency):
     db.add(db_energy)
     db.commit()
     
-@app.post("/energy/ml/image_story", status_code=status.HTTP_201_CREATED)
+@app.post("/energy/ml/image_story/{word_count}", status_code=status.HTTP_201_CREATED)
 async def add_predict_energy_consumption(energy : EnergyBase, db: db_dependency, img_style:str = 'anime', word_count: int = 1000):
     ## checking if a record already exists
     existing = db.query(models.Energy).filter(and_(
