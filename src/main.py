@@ -24,8 +24,8 @@ import google.generativeai as genai
 import random
 import calendar
 import json
-from src.database import get_db
-from src.schemas import *
+from database import get_db
+from schemas import *
 
 ## RECOMMENDATIONS FOR YARNI
 # 1. Always return something like the data/json obj or string
@@ -40,7 +40,7 @@ __ml_version__ = '0.1.1'
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins="http://localhost:5173",
+    allow_origins=["http://localhost:5173", "http://localhost:8000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"]
@@ -352,15 +352,16 @@ async def delete_user(user_id : int, db : db_dependency):
 
 
 ### ENERGY ENDPOINTS ###
-## HELPER FUNCTIONS ##
-def get_prediction(energy:EnergyBase, db: db_dependency):
+## POST ##
+
+async def get_prediction(energy:EnergyBase, db: db_dependency):
     ## creating input fields for the model
     # taking inputs
     weather = db.query(models.Weather).filter(models.Weather.date == energy.day).first()
     user_detail = db.query(models.UserDetail).filter(models.UserDetail.user_id == energy.user_id).first()
     # checking if the records exist
     if weather is None:
-        add_weather_from_api(WeatherAPIinfo(day=energy.day),db_dependency)
+        await add_weather_from_api(WeatherAPIinfo(day=energy.day),db)
         weather = db.query(models.Weather).filter(models.Weather.date == energy.day).first()
 
     if user_detail is None:
@@ -374,12 +375,16 @@ def get_prediction(energy:EnergyBase, db: db_dependency):
     ud_dt = UserDetailsBase.from_orm(user_detail).model_dump() if user_detail else {}
     # joining dicts
     combined_data = {**w_dt, **ud_dt}
+
+    # Get the type hints from MLdata 
     ml_data_types = get_type_hints(MLdata)
 
     # Filter and cast the combined_data based on the field names and types in MLdata
     filtered_casted_data = {}
-    
+
+    # Get the field names from MLdata
     field_names = [field.name for field in fields(MLdata)]
+
     for key in field_names:
         if key in combined_data:
             expected_type = ml_data_types.get(key)
@@ -397,23 +402,49 @@ def get_prediction(energy:EnergyBase, db: db_dependency):
             # Set default value if key not found in combined_data
             filtered_casted_data[key] = None
 
-    # opening the model
+    # Load the model
     BASE_DIR = Path(__file__).resolve(strict=True).parent
+    model_path = BASE_DIR / f'random_forest_regressor_{__ml_version__}.pkl'
 
-    with open(f'{BASE_DIR}\\random_forest_regressor_{__ml_version__}.pkl', 'rb') as m:
-        ml_model = pickle.load(m)
+    try:
+        with open(model_path, 'rb') as m:
+            ml_model = pickle.load(m)
+    except FileNotFoundError:
+        raise RuntimeError(f"Model file not found at {model_path}")
 
-    # Ensure the dict is ready for model prediction
-    return ml_model.predict(np.array(list(filtered_casted_data.values())).reshape(1, -1))[0]
+    # Ensure that the DataFrame matches the feature names used during model training
+    if hasattr(ml_model, 'feature_names_in_'):
+        model_features = ml_model.feature_names_in_
+    else:
+        raise RuntimeError("The loaded model does not have the feature_names_in_ attribute. "
+                        "Ensure it was trained with a DataFrame.")
 
-## POST ##
+    # Create a DataFrame with the correct feature names and a single row
+    features_df = pd.DataFrame([filtered_casted_data])
+
+    # Reindex the DataFrame to match the training features order and handle missing columns
+    features_df = features_df.reindex(columns=model_features)
+
+    # Handle missing values in features_df
+    features_df.fillna(0, inplace=True)  # Replace NaNs with 0 or another value
+
+    # Infer the objects' dtype after filling NaNs
+    features_df = features_df.infer_objects(copy=False)
+
+    # Predict using the model
+    try:
+        prediction = ml_model.predict(features_df)[0]
+        return float(prediction)
+    except Exception as e:
+        raise RuntimeError(f"Prediction failed: {e}")
+
 @app.post("/energy", status_code=status.HTTP_201_CREATED)
 async def add_energy_consumption(energy : EnergyBase, db: db_dependency):
     db_energy = models.Energy(**energy.model_dump())
     db.add(db_energy)
     db.commit()
     
-@app.post("/energy/ml", status_code=status.HTTP_201_CREATED)
+@app.post("/energy/ml/image_story", status_code=status.HTTP_201_CREATED)
 async def add_predict_energy_consumption(energy : EnergyBase, db: db_dependency, img_style:str = 'anime', word_count: int = 100):
     ## checking if a record already exists
     existing = db.query(models.Energy).filter(and_(
@@ -426,14 +457,15 @@ async def add_predict_energy_consumption(energy : EnergyBase, db: db_dependency,
             detail=f"Energy record for user_id {energy.user_id} on {energy.day} already exists."
         )
 
-    energy.predicted = get_prediction(energy, db)
+    predicted_ = await get_prediction(energy, db)
+    energy.predicted = float(predicted_)
     db_energy = models.Energy(**energy.model_dump())
     
+    # create_img_story(energy_details: EnergyBase, db: db_dependency, end_date: date = None, style: str = 'anime', word_count: int = 100)
+    img_tb = await create_img_story(energy_details=energy, db=db, style=img_style, word_count=word_count)
     # adding data to db
     db.add(db_energy)
     db.commit()
-    # create_img_story(energy_details: EnergyBase, db: db_dependency, end_date: date = None, style: str = 'anime', word_count: int = 100)
-    img_tb = create_img_story(energy_details=energy, db=db_dependency, style=img_style, word_count=word_count)
     return {
         'energy_table': energy,
         'image_story_table': img_tb
@@ -462,7 +494,7 @@ async def add_predict_energy_consumption_month(energy : EnergyBase, db: db_depen
                     consumed=consumption_per_day,
                     predicted=0
                 )
-            energy_pm.predicted = get_prediction(energy_pm, db)
+            energy_pm.predicted = await get_prediction(energy_pm, db)
             energy_records.append(energy_pm)
         
         except ValidationError as ve:

@@ -12,7 +12,10 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the src directory contents into the container at /app/src
-COPY src /app/src
+COPY src ./src
+
+# Set the PYTHONPATH to include the src directory
+ENV PYTHONPATH=/app/src
 
 # Make port 8000 available to the world outside this container
 EXPOSE 8000
