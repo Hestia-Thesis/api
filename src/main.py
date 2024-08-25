@@ -630,7 +630,7 @@ async def update_user(user_id : int, user_details : UserDetailsBase, db: db_depe
             setattr(db_user_details, key, value)
     db_user_details.user_id = user_id
     db.commit()
-    return db.query(models.UserDetail).filter(models.UserDetail.user_id == [user_id]).first()
+    return db.query(models.UserDetail).filter(models.UserDetail.user_id == user_id).first()
 
 ## DELETE ##
 
